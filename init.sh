@@ -15,4 +15,4 @@ git config svn.authorsfile ".git/authors.txt"
 echo ================================================================
 echo "Initializing svn init"
 echo ================================================================
-git svn init --prefix="$REMOTE/" --tags=tags --trunk=trunk --branches=branches https://svn.apache.org/repos/asf/activemq/activemq-apollo
+git svn init --prefix="apache/" --tags=tags --trunk=trunk --branches=branches https://svn.apache.org/repos/asf/activemq/activemq-apollo
