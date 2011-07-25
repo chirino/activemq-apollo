@@ -255,12 +255,12 @@ class Broker() extends BaseService {
   var authorizer:Authorizer = _
 
   def init_dispatch_queue(dispatch_queue:DispatchQueue) = {
-    import OptionSupport._
-    if( config.sticky_dispatching.getOrElse(true) ) {
-      val queues = getThreadQueues()
-      val queue = queues(Random.nextInt(queues.length));
-      dispatch_queue.setTargetQueue(queue)
-    }
+//    import OptionSupport._
+//    if( config.sticky_dispatching.getOrElse(true) ) {
+//      val queues = getThreadQueues()
+//      val queue = queues(Random.nextInt(queues.length));
+//      dispatch_queue.setTargetQueue(queue)
+//    }
   }
 
   /**

@@ -16,17 +16,15 @@
  */
 package org.apache.activemq.apollo.broker.store
 
-import org.fusesource.hawtdispatch._
-import org.fusesource.hawtdispatch.internal.DispatcherConfig
 import org.fusesource.hawtdispatch.BaseRetained
 import java.nio.channels.{FileChannel, WritableByteChannel, ReadableByteChannel}
 import java.io._
 import org.apache.activemq.apollo.util._
-import java.util.concurrent.TimeUnit
 import java.nio.channels.FileChannel.MapMode
 import java.security.{AccessController, PrivilegedAction}
-import java.lang.reflect.Method
 import java.nio.{MappedByteBuffer, ByteBuffer}
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.{ConcurrentLinkedQueue, ConcurrentHashMap, TimeUnit}
 
 /**
  * <p>Tracks allocated space</p>
@@ -300,39 +298,22 @@ object FileZeroCopyBufferAllocator {
       false
     }
   }
-}
 
-
-/**
- * <p>A ZeroCopyBufferAllocator which allocates on files.</p>
- *
- * @author <a href="http://hiramchirino.com">Hiram Chirino</a>
- */
-class FileZeroCopyBufferAllocator(val directory:File) extends ZeroCopyBufferAllocator {
-  import FileZeroCopyBufferAllocator._
-
-  // we use thread local allocators to
-  class AllocatorContext(val id:Int) {
+  class AllocatorContext(val file:File) {
 
     val allocator = new TreeAllocator(Allocation(0, Long.MaxValue))
-    var channel:FileChannel = new RandomAccessFile(new File(directory, ""+id+".data"), "rw").getChannel
-    var queue:DispatchQueue = _
-
-    var last_sync_size = channel.size
-    @volatile
-    var current_size = last_sync_size
-
-    def size_changed = this.synchronized {
-      val t = current_size
-      if( t != last_sync_size ) {
-        last_sync_size = t
-        true
-      } else {
-        false
-      }
-    }
-
+    val channel:FileChannel = new RandomAccessFile(file, "rw").getChannel
+    val free_queue = new ConcurrentLinkedQueue[Allocation]()
+    var current_size = 0L
     var _mmap:MappedByteBuffer = _
+
+    channel.truncate(0);
+
+    def close() = {
+      ByteBufferReleaser.release(_mmap)
+      _mmap = null
+      channel.close()
+    }
 
     def mmap_slice(offset:Long, size:Int) = {
       if( _mmap == null ) {
@@ -363,21 +344,31 @@ class FileZeroCopyBufferAllocator(val directory:File) extends ZeroCopyBufferAllo
       slice
     }
 
-    def sync = {
-      if( MMAP_TRANSFER_FROM && _mmap!=null ) {
-        _mmap.force
-      }
-      channel.force(size_changed)
-    }
-
     /**
      * <p>A ZeroCopyBuffer which was allocated on a file.</p>
      *
      * @author <a href="http://hiramchirino.com">Hiram Chirino</a>
      */
-    trait FileZeroCopyBufferTrait extends BaseRetained with ZeroCopyBuffer {
+    class AllocationBuffer(val allocation:Allocation) extends BaseRetained with ZeroCopyBuffer {
 
-      def offset:Long
+      def file = AllocatorContext.this.file
+      def offset: Long = allocation.offset
+      def size: Int = allocation.size.toInt
+
+      var buffer = if( MMAP_TRANSFER_TO ) {
+        mmap_slice(offset, size)
+      } else {
+        null
+      }
+
+      override def dispose: Unit = {
+        free_queue.add(allocation)
+        if( buffer!=null ) {
+          ByteBufferReleaser.release(buffer)
+          buffer = null
+        }
+        super.dispose
+      }
 
       def remaining(pos: Int): Int = size-pos
 
@@ -396,10 +387,35 @@ class FileZeroCopyBufferAllocator(val directory:File) extends ZeroCopyBufferAllo
         assert(count>=0)
 
         if( MMAP_TRANSFER_TO ) {
-          val buffer = mmap_slice(offset+src, count)
-          target.write(buffer)
+          buffer.position(src);
+          buffer.limit(src+count)
+          val slice = buffer.slice();
+          try {
+            target.write(slice)
+          } finally {
+            ByteBufferReleaser.release(slice)
+          }
         } else {
           channel.transferTo(offset+src, count, target).toInt
+        }
+      }
+
+      def write(src: ReadableByteChannel, target:Int): Int = {
+        assert(retained > 0)
+        val count: Int = remaining(target)
+        assert(count>=0)
+
+        if( MMAP_TRANSFER_FROM ) {
+          buffer.position(target);
+          buffer.limit(target+count)
+          val slice = buffer.slice();
+          try {
+            src.read(slice)
+          } finally {
+            ByteBufferReleaser.release(slice)
+          }
+        } else {
+          channel.transferFrom(src, offset+target, count).toInt
         }
       }
 
@@ -416,20 +432,6 @@ class FileZeroCopyBufferAllocator(val directory:File) extends ZeroCopyBufferAllo
           pos += count
           b.clear
         }
-      }
-
-      def write(src: ReadableByteChannel, target:Int): Int = {
-        assert(retained > 0)
-        val count: Int = remaining(target)
-        assert(count>=0)
-
-        if( MMAP_TRANSFER_FROM ) {
-          val buffer = mmap_slice(offset+target, count)
-          src.read(buffer)
-        } else {
-          channel.transferFrom(src, offset+target, count).toInt
-        }
-
       }
 
       def write(src: ByteBuffer, target: Int): Int = {
@@ -465,100 +467,63 @@ class FileZeroCopyBufferAllocator(val directory:File) extends ZeroCopyBufferAllo
       }
     }
 
-    class AllocationBuffer(val allocation:Allocation) extends FileZeroCopyBufferTrait {
-
-      def file = id
-      def offset: Long = allocation.offset
-      def size: Int = allocation.size.toInt
-
-      override def dispose: Unit = {
-        super.dispose
-        // since we might not get disposed from the same thread
-        // that did the allocation..
-        queue <<| ^{
-          allocation.free()
-        }
-      }
-    }
-
-    def alloc(size: Int) = current_context { ctx=>
+    def alloc(size: Int) = {
+      drain_free_allocations
       val allocation = allocator.alloc(size)
       assert(allocation!=null)
       current_size = current_size.max(allocation.offset + allocation.size)
       new AllocationBuffer(allocation)
     }
 
-    def view_buffer(the_offset:Long, the_size:Int):ZeroCopyBuffer = {
-      new FileZeroCopyBufferTrait {
-        def offset: Long = the_offset
-        def size: Int = the_size
+    def drain_free_allocations = {
+      var allocation = free_queue.poll()
+      while( allocation!=null ) {
+        allocator.free(allocation)
+        allocation = free_queue.poll()
       }
     }
-
   }
 
-  def to_alloc_buffer(buffer:ZeroCopyBuffer) = buffer.asInstanceOf[AllocatorContext#AllocationBuffer]
+}
+/**
+ * <p>A ZeroCopyBufferAllocator which allocates on files.</p>
+ *
+ * @author <a href="http://hiramchirino.com">Hiram Chirino</a>
+ */
+class FileZeroCopyBufferAllocator(val directory:File) extends ZeroCopyBufferAllocator {
+  import FileZeroCopyBufferAllocator._
 
-  val _current_allocator_context = new ThreadLocal[AllocatorContext]()
-  var contexts = Map[Int, AllocatorContext]()
+  final val context_counter = new AtomicInteger();
+  final val contexts = new ConcurrentHashMap[Thread, AllocatorContext]();
+
+  @volatile
+  var stopped = false;
 
   def start() = {
+    stopped = false;
     directory.mkdirs
-    var i=0;
-    for( queue <- getThreadQueues()) {
-      val ctx = new AllocatorContext(i)
-      ctx.queue = queue
-      contexts += i->ctx
-      queue {
-        _current_allocator_context.set(ctx)
-      }
-      i += 1
-    }
   }
 
   def stop() = {
-    for( queue <- getThreadQueues() ) {
-      queue {
-        _current_allocator_context.remove
+    stopped = true;
+    import collection.JavaConversions._
+    contexts.values().foreach(_.close)
+    contexts.clear
+  }
+
+  def alloc(size: Int): ZeroCopyBuffer = {
+    val thread: Thread = Thread.currentThread()
+    var ctx = contexts.get(thread)
+    if( ctx == null ) {
+      if (stopped) {
+        throw new IllegalStateException("Stopped");
+      } else {
+        var id = context_counter.incrementAndGet();
+        ctx = new AllocatorContext(new File(directory, "zerocp-"+id+".data" ))
+        contexts.put(thread, ctx);
       }
     }
-    contexts = Map()
-  }
-
-  def sync(file: Int) = {
-    contexts.get(file).get.sync
-  }
-
-  def alloc(size: Int): ZeroCopyBuffer = current_context { ctx=>
     ctx.alloc(size)
   }
-
-  def alloc_at(file:Int, offset:Long, size:Int):Unit = context(file) { ctx=>
-    ctx.allocator.alloc_at(Allocation(offset, size))
-  }
-
-  def free(file:Int, offset:Long, size:Int):Unit = context(file) { ctx=>
-    ctx.allocator.free(Allocation(offset, size))
-  }
-
-  def view_buffer(file:Int, the_offset:Long, the_size:Int):ZeroCopyBuffer = {
-    contexts.get(file).get.view_buffer(the_offset, the_size)
-  }
-
-  def context(i:Int)(func: (AllocatorContext)=>Unit):Unit= {
-    getThreadQueues()(i) {
-      func(current_allocator_context)
-    }
-  }
-
-  def current_context[T](func: (AllocatorContext)=>T):T = {
-    if( getCurrentThreadQueue == null ) {
-      getGlobalQueue().future(func(current_allocator_context))()
-    } else {
-      func(current_allocator_context)
-    }
-  }
-
-  def current_allocator_context:AllocatorContext = _current_allocator_context.get
 
 }

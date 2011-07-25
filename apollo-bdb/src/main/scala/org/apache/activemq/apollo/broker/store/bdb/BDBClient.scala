@@ -77,10 +77,10 @@ class BDBClient(store: BDBStore) {
 
     directory.mkdirs
 
-    if( Option(config.zero_copy).map(_.booleanValue).getOrElse(false) ) {
-      zero_copy_buffer_allocator = new FileZeroCopyBufferAllocator(zero_copy_dir)
-      zero_copy_buffer_allocator.start
-    }
+//    if( Option(config.zero_copy).map(_.booleanValue).getOrElse(false) ) {
+//      zero_copy_buffer_allocator = new FileZeroCopyBufferAllocator(zero_copy_dir)
+//      zero_copy_buffer_allocator.start
+//    }
 
     environment = new Environment(directory, env_config);
 
@@ -90,22 +90,22 @@ class BDBClient(store: BDBStore) {
       message_refs_db
       queues_db
 
-      if( zero_copy_buffer_allocator!=null ) {
-        zerocp_db.cursor(tx) { (_,value)=>
-          val v = decode_zcp_value(value)
-          zero_copy_buffer_allocator.alloc_at(v._1, v._2, v._3)
-          true
-        }
-      }
+//      if( zero_copy_buffer_allocator!=null ) {
+//        zerocp_db.cursor(tx) { (_,value)=>
+//          val v = decode_zcp_value(value)
+//          zero_copy_buffer_allocator.alloc_at(v._1, v._2, v._3)
+//          true
+//        }
+//      }
     }
   }
 
   def stop() = {
     environment.close
-    if( zero_copy_buffer_allocator!=null ) {
-      zero_copy_buffer_allocator.stop
-      zero_copy_buffer_allocator = null
-    }
+//    if( zero_copy_buffer_allocator!=null ) {
+//      zero_copy_buffer_allocator.stop
+//      zero_copy_buffer_allocator = null
+//    }
   }
 
   case class TxContext(tx:Transaction) {
@@ -281,13 +281,13 @@ class BDBClient(store: BDBStore) {
     import ctx._
     if( add_and_get(message_refs_db, msg_key, -1, tx)==0 ) {
       messages_db.delete(tx, msg_key)
-      if( zero_copy_buffer_allocator!=null ){
-        zerocp_db.get(tx, to_database_entry(msg_key)).foreach { v=>
-          val location  = decode_zcp_value(v)
-          zero_copy_buffer_allocator.free(location._1, location._2, location._3)
-        }
-        zerocp_db.delete(tx, msg_key)
-      }
+//      if( zero_copy_buffer_allocator!=null ){
+//        zerocp_db.get(tx, to_database_entry(msg_key)).foreach { v=>
+//          val location  = decode_zcp_value(v)
+//          zero_copy_buffer_allocator.free(location._1, location._2, location._3)
+//        }
+//        zerocp_db.delete(tx, msg_key)
+//      }
     }
   }
 
@@ -325,14 +325,15 @@ class BDBClient(store: BDBStore) {
                 import PBSupport._
 
                 val pb = if( message_record.zero_copy_buffer != null ) {
-                  val r = to_pb(action.message_record).copy
-                  val buffer = zero_copy_buffer_allocator.to_alloc_buffer(message_record.zero_copy_buffer)
-                  r.setZcpFile(buffer.file)
-                  r.setZcpOffset(buffer.offset)
-                  r.setZcpSize(buffer.size)
-                  zerocp_db.put(tx, message_record.key, (buffer.file, buffer.offset, buffer.size))
-                  zcp_files_to_sync += buffer.file
-                  r.freeze
+//                  val r = to_pb(action.message_record).copy
+//                  val buffer = zero_copy_buffer_allocator.to_alloc_buffer(message_record.zero_copy_buffer)
+//                  r.setZcpFile(buffer.file)
+//                  r.setZcpOffset(buffer.offset)
+//                  r.setZcpSize(buffer.size)
+//                  zerocp_db.put(tx, message_record.key, (buffer.file, buffer.offset, buffer.size))
+//                  zcp_files_to_sync += buffer.file
+//                  r.freeze
+                  to_pb(action.message_record)
                 } else {
                   to_pb(action.message_record)
                 }
@@ -351,9 +352,9 @@ class BDBClient(store: BDBStore) {
               }
           }
       }
-      if( zero_copy_buffer_allocator!=null ) {
-        zcp_files_to_sync.foreach(zero_copy_buffer_allocator.sync(_))
-      }
+//      if( zero_copy_buffer_allocator!=null ) {
+//        zcp_files_to_sync.foreach(zero_copy_buffer_allocator.sync(_))
+//      }
     }
     callback.run
   }
@@ -463,7 +464,7 @@ class BDBClient(store: BDBStore) {
             val pb:MessagePB.Buffer = data
             val rc = from_pb(pb)
             if( pb.hasZcpFile ) {
-              rc.zero_copy_buffer = zero_copy_buffer_allocator.view_buffer(pb.getZcpFile, pb.getZcpOffset, pb.getZcpSize)
+//              rc.zero_copy_buffer = zero_copy_buffer_allocator.view_buffer(pb.getZcpFile, pb.getZcpOffset, pb.getZcpSize)
             }
             rc
           }
@@ -492,7 +493,7 @@ class BDBClient(store: BDBStore) {
             val pb:MessagePB.Buffer = data
             val rc = from_pb(pb)
             if( pb.hasZcpFile ) {
-              rc.zero_copy_buffer = zero_copy_buffer_allocator.view_buffer(pb.getZcpFile, pb.getZcpOffset, pb.getZcpSize)
+//              rc.zero_copy_buffer = zero_copy_buffer_allocator.view_buffer(pb.getZcpFile, pb.getZcpOffset, pb.getZcpSize)
             }
             rc
           }
@@ -538,13 +539,13 @@ class BDBClient(store: BDBStore) {
             import PBSupport._
             val pb = MessagePB.FACTORY.parseUnframed(data.getData)
             if( pb.hasZcpFile ) {
-              val zcpb = zero_copy_buffer_allocator.view_buffer(pb.getZcpFile, pb.getZcpOffset, pb.getZcpSize)
-              var data = pb.copy
-              data.clearZcpFile
-              data.clearZcpFile
-              // write the pb frame and then the direct buffer data..
-              data.freeze.writeFramed(message_stream)
-              zcpb.read(message_stream)
+//              val zcpb = zero_copy_buffer_allocator.view_buffer(pb.getZcpFile, pb.getZcpOffset, pb.getZcpSize)
+//              var data = pb.copy
+//              data.clearZcpFile
+//              data.clearZcpFile
+//              // write the pb frame and then the direct buffer data..
+//              data.freeze.writeFramed(message_stream)
+//              zcpb.read(message_stream)
             } else {
               pb.writeFramed(message_stream)
             }
@@ -596,22 +597,23 @@ class BDBClient(store: BDBStore) {
         }
 
         var zcp_counter = 0
-        val max_ctx = zero_copy_buffer_allocator.contexts.size
+//        val max_ctx = zero_copy_buffer_allocator.contexts.size
 
         streams.using_message_stream { message_stream=>
           foreach[MessagePB.Buffer](message_stream, MessagePB.FACTORY) { pb=>
 
             val record:MessagePB.Buffer = if( pb.hasZcpSize ) {
-              val cp = pb.copy
-              val zcpb = zero_copy_buffer_allocator.contexts(zcp_counter % max_ctx).alloc(cp.getZcpSize)
-              cp.setZcpFile(zcpb.file)
-              cp.setZcpOffset(zcpb.offset)
-
-              zcp_counter += 1
-              zcpb.write(message_stream)
-
-              zerocp_db.put(tx, pb.getMessageKey, (zcpb.file, zcpb.offset, zcpb.size))
-              cp.freeze
+//              val cp = pb.copy
+//              val zcpb = zero_copy_buffer_allocator.contexts(zcp_counter % max_ctx).alloc(cp.getZcpSize)
+//              cp.setZcpFile(zcpb.file)
+//              cp.setZcpOffset(zcpb.offset)
+//
+//              zcp_counter += 1
+//              zcpb.write(message_stream)
+//
+//              zerocp_db.put(tx, pb.getMessageKey, (zcpb.file, zcpb.offset, zcpb.size))
+//              cp.freeze
+              pb
             } else {
               pb
             }
