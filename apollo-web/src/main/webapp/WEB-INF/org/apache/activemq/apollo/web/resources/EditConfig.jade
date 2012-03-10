@@ -18,9 +18,9 @@
 - import helper._
 
 .breadcumbs
-  a(href={strip_resolve(".")+".html"}) Back
+  a(href={strip_resolve(".")}) Back
 
-form(method="post" action={file+".html"})
+form(method="post" action={file})
   - if( can_write )
     div
       input(type="submit" value="Update")

@@ -29,20 +29,20 @@ h2 Virtual Hosts
 ul
   - for( x <- virtual_hosts )
     li
-      a(href={ path("virtual-hosts/"+x+".html") }) #{x}
+      a(href={ path("virtual-hosts/"+x) }) #{x}
 
 h2 Connectors
 ul
   - for( x <- connectors )
     li
-      a(href={ path("connectors/"+x+".html") }) #{x}
+      a(href={ path("connectors/"+x) }) #{x}
 
 h2 Connections
 p total connections ever : #{connection_counter}
 ul
   - for( x <- connections )
     li
-      a(href={ path("connections/"+x.id+".html") }) #{x.label}
+      a(href={ path("connections/"+x.id) }) #{x.label}
 
 h2 Operating System
 p Name : #{jvm_metrics.os_name}

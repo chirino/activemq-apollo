@@ -22,21 +22,34 @@ import scala.collection.Iterable
 import org.apache.activemq.apollo.util.path.PathParser
 import org.apache.activemq.apollo.util._
 import javax.ws.rs._
-import core.Response.Status
-import core.{Response, Context}
 import javax.ws.rs.core.Response.Status._
 import management.ManagementFactory
 import javax.management.ObjectName
 import javax.management.openmbean.CompositeData
 import org.josql.{QueryResults, Query}
 import java.util.regex.Pattern
-import javax.servlet.http.HttpServletResponse
 import java.util.{Collections, ArrayList}
 import org.apache.activemq.apollo.broker._
-import java.security.Principal
 import org.apache.activemq.apollo.dto._
 import javax.ws.rs.core.MediaType._
-import security.SecurityContext
+import com.wordnik.swagger.core._
+
+@Path(          "/api/json/broker")
+@Api(value =    "/api/json/broker",
+  listingPath = "/api/docs/broker")
+@Produces(Array("application/json"))
+class BrokerResourceJSON extends BrokerResource
+
+@Path(          "/api/docs/broker{ext:(\\.json)?}")
+@Api(value =    "/api/json/broker",
+  listingPath = "/api/docs/broker",
+  listingClass = "org.apache.activemq.apollo.web.resources.BrokerResourceJSON")
+class BrokerResourceHelp extends HelpResourceJSON
+
+@Path("/broker")
+@Produces(Array("text/html"))
+class BrokerResourceHTML extends BrokerResource
+
 
 /**
  * <p>
@@ -46,105 +59,22 @@ import security.SecurityContext
  *
  * @author <a href="http://hiramchirino.com">Hiram Chirino</a>
  */
-@Produces(Array(APPLICATION_JSON, APPLICATION_XML, TEXT_XML, "text/html;qs=5"))
-case class BrokerResource() extends Resource {
+class BrokerResource extends Resource {
   import Resource._
 
-  @GET
-  @Path("whoami")
-  def whoami():java.util.List[PrincipalDTO] = {
-    val rc: Set[Principal] = with_broker { broker =>
-      val rc = FutureResult[Set[Principal]]()
-      if(broker.authenticator!=null) {
-        authenticate(broker.authenticator) { security_context =>
-          if(security_context!=null) {
-            rc.set(Success(security_context.principals))
-          } else {
-            rc.set(Success(Set[Principal]()))
-          }
-        }
-      } else {
-        rc.set(Success(Set[Principal]()))
-      }
-      rc
-    }
-    import collection.JavaConversions._
-    new ArrayList[PrincipalDTO](rc.map(x=>new PrincipalDTO(x.getClass.getName, x.getName)))
-  }
-
-  @Produces(Array("text/html;qs=5"))
-  @GET
-  @Path("signin")
-  def get_signin_html(@Context response:HttpServletResponse, @QueryParam("username") username:String, @QueryParam("password") password:String): ErrorDTO = {
-    if(post_signin(response, username, password)) {
-      result(strip_resolve("../.."))
-    } else {
-      var dto = new ErrorDTO()
-      dto.code = "%d: %s".format(BAD_REQUEST.getStatusCode, BAD_REQUEST.getReasonPhrase)
-      dto.message = "Invalid user id or password";
-      result(BAD_REQUEST, dto)
-    }
-  }
-
-//  @GET
-//  @Path("signin")
-//  def get_signin(@Context response:HttpServletResponse, @QueryParam("username") username:String, @QueryParam("password") password:String):Boolean = {
-//    post_signin(response, username, password)
+//  @Path("config")
+//  def config_resource:ConfigurationResource = {
+//    with_broker { broker =>
+//      configing(broker) {
+//        ConfigurationResource(this, broker.config)
+//      }
+//    }
+//  }
 //  }
 
-  @POST
-  @Path("signin")
-  def post_signin(@Context response:HttpServletResponse, @FormParam("username") username:String, @FormParam("password") password:String):Boolean =  {
-    try {
-      val user_info = UserInfo(username, password)
-      http_request.setAttribute("user_info", user_info)
-      unwrap_future_result[Boolean] {
-        with_broker { broker =>
-          monitoring(broker) {
-            // Only create the session if he is a valid user.
-            val session = http_request.getSession(true)
-            user_info.security_context = http_request.getAttribute(SECURITY_CONTEXT_ATTRIBUTE).asInstanceOf[SecurityContext]
-            session.setAttribute("user_info", user_info)
-            true
-          }
-        }
-      }
-    } catch {
-      case e:WebApplicationException => // this happens if user is not authorized
-        e.printStackTrace()
-        false
-    }
-  }
-
-  @Produces(Array("text/html"))
-  @GET @Path("signout")
-  def signout_html():String = {
-    signout()
-    result(strip_resolve("../.."))
-    ""
-  }
-
-  @Produces(Array(APPLICATION_JSON, APPLICATION_XML, TEXT_XML))
-  @GET @Path("signout")
-  def signout():String =  {
-    val session = http_request.getSession(false)
-    if( session !=null ) {
-      session.invalidate();
-    }
-    ""
-  }
-
-  @Path("config")
-  def config_resource:ConfigurationResource = {
-    with_broker { broker =>
-      configing(broker) {
-        ConfigurationResource(this, broker.config)
-      }
-    }
-  }
-
 
   @GET
+  @ApiOperation(value = "Returns a BrokerStatusDTO which contains summary information about the broker and the JVM")
   def get_broker():BrokerStatusDTO = {
     with_broker { broker =>
       monitoring(broker) {
@@ -237,7 +167,8 @@ case class BrokerResource() extends Resource {
   }
 
   @GET
-  @Path("queue-metrics")
+  @Path("/queue-metrics")
+  @ApiOperation(value = "Returns an AggregateDestMetricsDTO holding the summary of all the queue metrics")
   def get_queue_metrics(): AggregateDestMetricsDTO = {
     val rc:AggregateDestMetricsDTO = with_broker { broker =>
       monitoring(broker) {
@@ -249,7 +180,8 @@ case class BrokerResource() extends Resource {
   }
 
   @GET
-  @Path("topic-metrics")
+  @Path("/topic-metrics")
+  @ApiOperation(value = "Returns an AggregateDestMetricsDTO holding the summary of all the topic metrics")
   def get_topic_metrics(): AggregateDestMetricsDTO = {
     val rc:AggregateDestMetricsDTO = with_broker { broker =>
       monitoring(broker) {
@@ -261,7 +193,8 @@ case class BrokerResource() extends Resource {
   }
 
   @GET
-  @Path("dsub-metrics")
+  @Path("/dsub-metrics")
+  @ApiOperation(value = "Returns an AggregateDestMetricsDTO holding the summary of all the durable subscription metrics")
   def get_dsub_metrics(): AggregateDestMetricsDTO = {
     val rc:AggregateDestMetricsDTO = with_broker { broker =>
       monitoring(broker) {
@@ -286,7 +219,8 @@ case class BrokerResource() extends Resource {
   }
 
   @GET
-  @Path("dest-metrics")
+  @Path("/dest-metrics")
+  @ApiOperation(value = "Returns an AggregateDestMetricsDTO holding the summary of all the destination metrics")
   def get_dest_metrics(): AggregateDestMetricsDTO = {
     aggregate(get_queue_metrics(), get_topic_metrics(), get_dsub_metrics())
   }
@@ -331,8 +265,9 @@ case class BrokerResource() extends Resource {
   def get_dsub_metrics(host:VirtualHost):FutureResult[AggregateDestMetricsDTO] = host.get_dsub_metrics
 
 
-  @GET @Path("virtual-hosts")
+  @GET @Path("/virtual-hosts")
   @Produces(Array(APPLICATION_JSON))
+  @ApiOperation(value = "Returns an DataPageDTO holding all the virtual hosts")
   def virtual_host(@QueryParam("f") f:java.util.List[String], @QueryParam("q") q:String,
                   @QueryParam("p") p:java.lang.Integer, @QueryParam("ps") ps:java.lang.Integer, @QueryParam("o") o:java.util.List[String] ):DataPageDTO = {
 
@@ -346,7 +281,8 @@ case class BrokerResource() extends Resource {
     }
   }
 
-  @GET @Path("virtual-hosts/{id}")
+  @GET @Path("/virtual-hosts/{id}")
+  @ApiOperation(value = "Returns a VirtualHostStatusDTO holding the status of the requested virtual host")
   def virtual_host(@PathParam("id") id : String):VirtualHostStatusDTO = {
     with_virtual_host(id) { host =>
       monitoring(host) {
@@ -378,7 +314,7 @@ case class BrokerResource() extends Resource {
     result
   }
 
-  @GET @Path("virtual-hosts/{id}/queue-metrics")
+  @GET @Path("/virtual-hosts/{id}/queue-metrics")
   def virtual_host_queue_metrics(@PathParam("id") id : String): AggregateDestMetricsDTO = {
     val rc:AggregateDestMetricsDTO = with_virtual_host(id) { host =>
       monitoring(host) {
@@ -389,7 +325,7 @@ case class BrokerResource() extends Resource {
     rc
   }
 
-  @GET @Path("virtual-hosts/{id}/topic-metrics")
+  @GET @Path("/virtual-hosts/{id}/topic-metrics")
   def virtual_host_topic_metrics(@PathParam("id") id : String): AggregateDestMetricsDTO = {
     val rc:AggregateDestMetricsDTO = with_virtual_host(id) { host =>
       monitoring(host) {
@@ -400,7 +336,7 @@ case class BrokerResource() extends Resource {
     rc
   }
 
-  @GET @Path("virtual-hosts/{id}/dsub-metrics")
+  @GET @Path("/virtual-hosts/{id}/dsub-metrics")
   def virtual_host_dsub_metrics(@PathParam("id") id : String): AggregateDestMetricsDTO = {
     val rc:AggregateDestMetricsDTO = with_virtual_host(id) { host =>
       monitoring(host) {
@@ -411,13 +347,13 @@ case class BrokerResource() extends Resource {
     rc
   }
 
-  @GET @Path("virtual-hosts/{id}/dest-metrics")
+  @GET @Path("/virtual-hosts/{id}/dest-metrics")
   def virtual_host_dest_metrics(@PathParam("id") id : String): AggregateDestMetricsDTO = {
     aggregate(virtual_host_queue_metrics(id), virtual_host_topic_metrics(id), virtual_host_dsub_metrics(id))
   }
 
 
-  @GET @Path("virtual-hosts/{id}/store")
+  @GET @Path("/virtual-hosts/{id}/store")
   def store(@PathParam("id") id : String):StoreStatusDTO = {
     with_virtual_host(id) { host =>
       monitoring(host) {
@@ -509,7 +445,7 @@ case class BrokerResource() extends Resource {
     }
   }
 
-  @GET @Path("virtual-hosts/{id}/topics")
+  @GET @Path("/virtual-hosts/{id}/topics")
   @Produces(Array(APPLICATION_JSON))
   def topics(@PathParam("id") id : String, @QueryParam("f") f:java.util.List[String],
             @QueryParam("q") q:String, @QueryParam("p") p:java.lang.Integer, @QueryParam("ps") ps:java.lang.Integer, @QueryParam("o") o:java.util.List[String] ):DataPageDTO = {
@@ -527,7 +463,7 @@ case class BrokerResource() extends Resource {
     }
   }
 
-  @GET @Path("virtual-hosts/{id}/topics/{name:.*}")
+  @GET @Path("/virtual-hosts/{id}/topics/{name:.*}")
   def topic(@PathParam("id") id : String, @PathParam("name") name : String):TopicStatusDTO = {
     with_virtual_host(id) { host =>
       val router:LocalRouter = host
@@ -538,7 +474,7 @@ case class BrokerResource() extends Resource {
     }
   }
 
-  @GET @Path("virtual-hosts/{id}/topic-queues/{name:.*}/{qid}")
+  @GET @Path("/virtual-hosts/{id}/topic-queues/{name:.*}/{qid}")
   def topic(@PathParam("id") id : String,@PathParam("name") name : String,  @PathParam("qid") qid : Long, @QueryParam("entries") entries:Boolean):QueueStatusDTO = {
     with_virtual_host(id) { host =>
       val router:LocalRouter = host
@@ -552,7 +488,7 @@ case class BrokerResource() extends Resource {
     }
   }
 
-  @GET @Path("virtual-hosts/{id}/queues")
+  @GET @Path("/virtual-hosts/{id}/queues")
   @Produces(Array(APPLICATION_JSON))
   def queues(@PathParam("id") id : String, @QueryParam("f") f:java.util.List[String],
             @QueryParam("q") q:String, @QueryParam("p") p:java.lang.Integer, @QueryParam("ps") ps:java.lang.Integer, @QueryParam("o") o:java.util.List[String] ):DataPageDTO = {
@@ -569,7 +505,7 @@ case class BrokerResource() extends Resource {
     }
   }
 
-  @GET @Path("virtual-hosts/{id}/queues/{name:.*}")
+  @GET @Path("/virtual-hosts/{id}/queues/{name:.*}")
   def queue(@PathParam("id") id : String, @PathParam("name") name : String, @QueryParam("entries") entries:Boolean ):QueueStatusDTO = {
     with_virtual_host(id) { host =>
       val router: LocalRouter = host
@@ -580,7 +516,7 @@ case class BrokerResource() extends Resource {
     }
   }
 
-  @DELETE @Path("virtual-hosts/{id}/queues/{name:.*}")
+  @DELETE @Path("/virtual-hosts/{id}/queues/{name:.*}")
   @Produces(Array(APPLICATION_JSON, APPLICATION_XML,TEXT_XML))
   def queue_delete(@PathParam("id") id : String, @PathParam("name") name : String):Unit = unwrap_future_result {
     with_virtual_host(id) { host =>
@@ -592,14 +528,14 @@ case class BrokerResource() extends Resource {
     }
   }
 
-  @POST @Path("virtual-hosts/{id}/queues/{name:.*}/action/delete")
+  @POST @Path("/virtual-hosts/{id}/queues/{name:.*}/action/delete")
   @Produces(Array("text/html;qs=5"))
   def post_queue_delete_and_redirect(@PathParam("id") id : String, @PathParam("name") name : String):Unit = unwrap_future_result {
     queue_delete(id, name)
     result(strip_resolve("../../.."))
   }
 
-  @GET @Path("virtual-hosts/{id}/dsubs")
+  @GET @Path("/virtual-hosts/{id}/dsubs")
   @Produces(Array(APPLICATION_JSON))
   def durable_subscriptions(@PathParam("id") id : String, @QueryParam("f") f:java.util.List[String],
             @QueryParam("q") q:String, @QueryParam("p") p:java.lang.Integer, @QueryParam("ps") ps:java.lang.Integer, @QueryParam("o") o:java.util.List[String] ):DataPageDTO = {
@@ -615,7 +551,7 @@ case class BrokerResource() extends Resource {
       rc
     }
   }
-  @GET @Path("virtual-hosts/{id}/dsubs/{name:.*}")
+  @GET @Path("/virtual-hosts/{id}/dsubs/{name:.*}")
   def durable_subscription(@PathParam("id") id : String, @PathParam("name") name : String, @QueryParam("entries") entries:Boolean):QueueStatusDTO = {
     with_virtual_host(id) { host =>
       val router:LocalRouter = host
@@ -627,7 +563,7 @@ case class BrokerResource() extends Resource {
   }
 
 
-  @DELETE @Path("virtual-hosts/{id}/dsubs/{name:.*}")
+  @DELETE @Path("/virtual-hosts/{id}/dsubs/{name:.*}")
   @Produces(Array(APPLICATION_JSON, APPLICATION_XML,TEXT_XML))
   def dsub_delete(@PathParam("id") id : String, @PathParam("name") name : String):Unit = unwrap_future_result {
     with_virtual_host(id) { host =>
@@ -639,7 +575,7 @@ case class BrokerResource() extends Resource {
     }
   }
 
-  @POST @Path("virtual-hosts/{id}/dsubs/{name:.*}/action/delete")
+  @POST @Path("/virtual-hosts/{id}/dsubs/{name:.*}/action/delete")
   @Produces(Array("text/html;qs=5"))
   def post_dsub_delete_and_redirect(@PathParam("id") id : String, @PathParam("name") name : String):Unit = unwrap_future_result {
     dsub_delete(id, name)
@@ -659,7 +595,7 @@ case class BrokerResource() extends Resource {
     q.status(entries)
   }
 
-  @GET @Path("connectors")
+  @GET @Path("/connectors")
   @Produces(Array(APPLICATION_JSON))
   def connectors(@QueryParam("f") f:java.util.List[String], @QueryParam("q") q:String,
                   @QueryParam("p") p:java.lang.Integer, @QueryParam("ps") ps:java.lang.Integer, @QueryParam("o") o:java.util.List[String] ):DataPageDTO = {
@@ -674,7 +610,7 @@ case class BrokerResource() extends Resource {
     }
   }
 
-  @GET @Path("connectors/{id}")
+  @GET @Path("/connectors/{id}")
   def connector(@PathParam("id") id : String):ServiceStatusDTO = {
     with_connector(id) { connector =>
       monitoring(connector.broker) {
@@ -683,7 +619,7 @@ case class BrokerResource() extends Resource {
     }
   }
 
-  @POST @Path("connectors/{id}/action/stop")
+  @POST @Path("/connectors/{id}/action/stop")
   def post_connector_stop(@PathParam("id") id : String):Unit = unwrap_future_result {
     with_connector(id) { connector =>
       admining(connector.broker) {
@@ -693,7 +629,7 @@ case class BrokerResource() extends Resource {
     result(strip_resolve(".."))
   }
 
-  @POST @Path("connectors/{id}/action/start")
+  @POST @Path("/connectors/{id}/action/start")
   def post_connector_start(@PathParam("id") id : String):Unit = unwrap_future_result {
     with_connector(id) { connector =>
       admining(connector.broker) {
@@ -704,7 +640,7 @@ case class BrokerResource() extends Resource {
   }
 
   @GET
-  @Path("connection-metrics")
+  @Path("/connection-metrics")
   def get_connection_metrics(): AggregateConnectionMetricsDTO = {
     val f = new ArrayList[String]()
     f.add("read_counter")
@@ -730,7 +666,7 @@ case class BrokerResource() extends Resource {
   }
 
 
-  @GET @Path("connections")
+  @GET @Path("/connections")
   @Produces(Array(APPLICATION_JSON))
   def connections(@QueryParam("f") f:java.util.List[String], @QueryParam("q") q:String,
                   @QueryParam("p") p:java.lang.Integer, @QueryParam("ps") ps:java.lang.Integer, @QueryParam("o") o:java.util.List[String] ):DataPageDTO = {
@@ -748,7 +684,7 @@ case class BrokerResource() extends Resource {
     }
   }
 
-  @GET @Path("connections/{id}")
+  @GET @Path("/connections/{id}")
   def connection(@PathParam("id") id : Long):ConnectionStatusDTO = {
     with_connection(id){ connection=>
       monitoring(connection.connector.broker) {
@@ -757,7 +693,7 @@ case class BrokerResource() extends Resource {
     }
   }
 
-  @DELETE @Path("connections/{id}")
+  @DELETE @Path("/connections/{id}")
   @Produces(Array(APPLICATION_JSON, APPLICATION_XML,TEXT_XML))
   def connection_delete(@PathParam("id") id : Long):Unit = unwrap_future_result {
     with_connection(id){ connection=>
@@ -768,7 +704,7 @@ case class BrokerResource() extends Resource {
   }
 
 
-  @POST @Path("connections/{id}/action/delete")
+  @POST @Path("/connections/{id}/action/delete")
   @Produces(Array("text/html;qs=5"))
   def post_connection_delete_and_redirect(@PathParam("id") id : Long):Unit = unwrap_future_result {
     connection_delete(id)
@@ -776,7 +712,7 @@ case class BrokerResource() extends Resource {
   }
 
   @POST
-  @Path("action/shutdown")
+  @Path("/action/shutdown")
   def command_shutdown:Unit = unwrap_future_result {
     info("JVM shutdown requested via web interface")
     with_broker { broker =>

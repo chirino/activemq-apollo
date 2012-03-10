@@ -733,13 +733,16 @@
       <releases><enabled>true</enabled></releases>
       <snapshots><enabled>false</enabled></snapshots>
     </repository>
+
+<!--     
     <repository>
       <id>glassfish-repo-archive</id>
       <url>http://maven.glassfish.org/content/groups/glassfish</url>
       <releases><enabled>true</enabled></releases>
       <snapshots><enabled>false</enabled></snapshots>
     </repository>
-
+ -->
+ 
     <repository>
       <id>scala-tools.org-releases</id>
       <url>http://scala-tools.org/repo-releases</url>

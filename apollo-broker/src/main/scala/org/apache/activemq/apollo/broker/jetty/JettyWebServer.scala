@@ -22,7 +22,6 @@ import org.eclipse.jetty.webapp.WebAppContext
 import org.eclipse.jetty.server.nio.SelectChannelConnector
 import org.apache.activemq.apollo.util._
 import org.fusesource.hawtdispatch._
-import org.apache.activemq.apollo.broker.web.{WebServer, WebServerFactory}
 import org.eclipse.jetty.server.handler.HandlerList
 import collection.mutable.HashMap
 import org.eclipse.jetty.server.ssl.SslSelectChannelConnector
@@ -33,6 +32,8 @@ import java.net.{URL, URI}
 import java.io.{FileOutputStream, File}
 import java.util.jar.JarInputStream
 import java.lang.String
+import org.eclipse.jetty.servlet.{FilterMapping, FilterHolder}
+import org.apache.activemq.apollo.broker.web.{AllowAnyOriginFilter, WebServer, WebServerFactory}
 
 /**
  * <p>
@@ -216,6 +217,9 @@ class JettyWebServer(val broker:Broker) extends WebServer with BaseService {
             context.setContextPath(prefix)
             context.setWar(webapp_path.getCanonicalPath)
             context.setClassLoader(Broker.class_loader)
+            if( !web_admin.cors_origin.isEmpty ) {
+              context.addFilter(new FilterHolder(new AllowAnyOriginFilter(web_admin.cors_origin.toSet)), "/*", FilterMapping.DEFAULT)
+            }
             if( broker.tmp !=null ) {
               context.setTempDirectory(broker.tmp)
             }

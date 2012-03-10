@@ -18,7 +18,7 @@
 - import helper._
 
 .breadcumbs
-  a(href={strip_resolve("..")+".html"}) Back
+  a(href={strip_resolve("..")}) Back
 
 h1 Topic: #{id}
 
@@ -38,9 +38,9 @@ ul
     li.producer
       - x.kind match
         - case "queue" =>
-          a(href={ path("../../queues/"+x.id+".html") }) #{x.label}
+          a(href={ path("../../queues/"+x.id) }) #{x.label}
         - case "connection" =>
-          a(href={ path("../../../../connections/"+x.id+".html") }) #{x.label}
+          a(href={ path("../../../../connections/"+x.id) }) #{x.label}
         - case _ =>
       p dispatched: #{x.enqueue_item_counter} messages (#{memory(x.enqueue_size_counter)}), #{uptime(x.enqueue_ts)} ago
 
@@ -51,11 +51,11 @@ ul
     li.consumer
       - x.kind match
         - case "topic-queue" =>
-          a(href={ path("../../topic-queues/"+id+"/"+x.id+".html") }) #{x.label}
+          a(href={ path("../../topic-queues/"+id+"/"+x.id) }) #{x.label}
         - case "queue" =>
-          a(href={ path("../../queues/"+x.id+".html") }) #{x.label}
+          a(href={ path("../../queues/"+x.id) }) #{x.label}
         - case "connection" =>
-          a(href={ path("../../../../connections/"+x.id+".html") }) #{x.label}
+          a(href={ path("../../../../connections/"+x.id) }) #{x.label}
         - case _ =>
       p dispatched: #{x.enqueue_item_counter} messages (#{memory(x.enqueue_size_counter)}), #{uptime(x.enqueue_ts)} ago
 
@@ -63,4 +63,4 @@ h4 Durable Subscribers
 ul
   - for( x <- dsubs )
     li
-      a(href={ path("../../dsubs/"+x+".html") }) #{x}
+      a(href={ path("../../dsubs/"+x) }) #{x}

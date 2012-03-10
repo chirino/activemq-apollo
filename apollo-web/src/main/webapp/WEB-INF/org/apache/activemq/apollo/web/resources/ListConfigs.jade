@@ -18,9 +18,9 @@
 - import helper._
 
 .breadcumbs
-  a(href={strip_resolve("..")+".html"}) Back
+  a(href={strip_resolve("..")}) Back
 
 ul
   - for( file <- files )
     li
-      a(href={"files/"+file+".html"}) = file
+      a(href={"files/"+file}) = file

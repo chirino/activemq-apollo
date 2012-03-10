@@ -22,7 +22,9 @@ import javax.xml.bind.annotation.XmlAccessType;
 import javax.xml.bind.annotation.XmlAccessorType;
 import javax.xml.bind.annotation.XmlAttribute;
 import javax.xml.bind.annotation.XmlElement;
+import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 
 /**
@@ -41,6 +43,14 @@ public class WebAdminDTO {
      */
     @XmlAttribute
     public String bind;
+
+    /**
+     * The list external domains that are allowed to
+     * do Cross-Origin Resource Sharing with this broker.  Use
+     * '*' to match all domains.
+     */
+    @XmlElement(name="cors_origin")
+    public List<StringIdLabeledDTO> cors_origin = new ArrayList<StringIdLabeledDTO>();
 
     @Override
     public boolean equals(Object o) {
