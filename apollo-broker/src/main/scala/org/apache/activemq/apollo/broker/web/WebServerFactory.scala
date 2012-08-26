@@ -20,6 +20,8 @@ import org.apache.activemq.apollo.util._
 import org.apache.activemq.apollo.broker.Broker
 import org.fusesource.hawtdispatch.Task
 import java.net.URI
+import java.nio.channels.SocketChannel
+import java.nio.ByteBuffer
 
 /**
  * <p>
@@ -30,6 +32,7 @@ import java.net.URI
 trait WebServer extends Service {
   def update(on_complete:Task):Unit
   def uris():Array[URI]
+  def accept(channel:SocketChannel, putback:ByteBuffer)
 }
 
 trait WebServerFactory {

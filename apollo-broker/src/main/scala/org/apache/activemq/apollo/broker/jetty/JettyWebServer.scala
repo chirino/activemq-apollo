@@ -35,6 +35,13 @@ import java.lang.String
 import org.eclipse.jetty.servlet.{FilterMapping, FilterHolder}
 import org.apache.activemq.apollo.broker.web.{AllowAnyOriginFilter, WebServer, WebServerFactory}
 import javax.servlet._
+import org.fusesource.hawtdispatch.transport.{TcpTransport, Transport}
+import org.fusesource.hawtdispatch._
+import java.nio.channels.{SelectionKey, SocketChannel}
+import java.nio.ByteBuffer
+import org.eclipse.jetty.io.nio.{SelectorManager, SelectChannelEndPoint}
+import java.util.concurrent.ConcurrentHashMap
+import java.lang.reflect.Modifier
 
 /**
  * <p>
@@ -128,6 +135,24 @@ object JettyWebServer extends Log {
     rc
   }
 
+  // Let get turn a 'private final' field, into a 'public non-final' :)
+  // so that we can 'put back' they bytes we read to detect the
+  // protocol.
+  val ChannelEndPoint_channel_field = {
+    try {
+      val field = classOf[org.eclipse.jetty.io.nio.ChannelEndPoint].getDeclaredField("_channel")
+      field.setAccessible(true)
+      val modifiersField = classOf[java.lang.reflect.Field].getDeclaredField("modifiers");
+      modifiersField.setAccessible(true);
+      modifiersField.setInt(field, field.getModifiers() & ~Modifier.FINAL);
+      field
+    } catch {
+      case e =>
+        e.printStackTrace()
+        null
+    }
+  }
+
 }
 
 class JettyWebServer(val broker:Broker) extends WebServer with BaseService {
@@ -140,6 +165,57 @@ class JettyWebServer(val broker:Broker) extends WebServer with BaseService {
   val dispatch_queue = createQueue()
   var web_admins = List[WebAdminDTO]()
   var uri_addresses = List[URI]()
+
+  object apollo_connector extends SelectChannelConnector {
+
+    override def doStart() {
+      _buffers.start()
+      getSelectorManager.setSelectSets(getAcceptors());
+      getSelectorManager.setMaxIdleTime(getMaxIdleTime());
+      getSelectorManager.setLowResourcesConnections(getLowResourcesConnections());
+      getSelectorManager.setLowResourcesMaxIdleTime(getLowResourcesMaxIdleTime());
+      getSelectorManager.start()
+    }
+    override def doStop() {
+      getSelectorManager.stop()
+      _buffers.stop()
+    }
+    override def getLocalPort = 0
+    override def getPort = 0
+
+
+    val putback_map = new ConcurrentHashMap[SocketChannel, ByteBuffer]()
+
+    def accept(channel: SocketChannel, putback:ByteBuffer) = {
+      if( putback!=null && putback.hasRemaining ) {
+        putback_map.put(channel, putback)
+      }
+
+      val server = getServer
+      val manager = getSelectorManager
+      if (server!=null && server.isStarted && manager.isStarted) {
+        channel.configureBlocking(false);
+        configure(channel.socket());
+        manager.register(channel);
+      }
+    }
+
+    override def newEndPoint(channel: SocketChannel, selectSet: SelectorManager#SelectSet, key: SelectionKey): SelectChannelEndPoint = {
+      val rc= new SelectChannelEndPoint(channel,selectSet,key, getMaxIdleTime);
+      val putback = putback_map.remove(channel)
+      if ( putback!=null ) {
+        // dirty.. dirty.. yeah I know!
+        ChannelEndPoint_channel_field.set(rc, new PutBackByteChannel(channel, putback));
+      }
+      rc.setConnection(selectSet.getManager().newConnection(channel,rc, key.attachment()));
+      return rc;
+    }
+
+  }
+
+  def accept(channel: SocketChannel, putback:ByteBuffer) = Broker.BLOCKABLE_THREAD_POOL {
+    apollo_connector.accept(channel, putback)
+  }
 
   protected def _start(on_completed: Task) = Broker.BLOCKABLE_THREAD_POOL {
     this.synchronized {
@@ -162,6 +238,7 @@ class JettyWebServer(val broker:Broker) extends WebServer with BaseService {
 
         val contexts = HashMap[String, Handler]()
         val connectors = HashMap[String, Connector]()
+        connectors.put("", apollo_connector)
 
         web_admins = config.web_admins.toList
         web_admins.foreach { web_admin =>
@@ -192,6 +269,7 @@ class JettyWebServer(val broker:Broker) extends WebServer with BaseService {
           // Only add the connector if not yet added..
           val connector_id = scheme+"://"+host+":"+port
           if ( !connectors.containsKey(connector_id) ) {
+
 
             val connector = scheme match {
               case "http" => new SelectChannelConnector
