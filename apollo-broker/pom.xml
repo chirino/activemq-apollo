@@ -96,7 +96,7 @@
     <!-- for optional web admin -->
     <dependency>
       <groupId>org.eclipse.jetty.aggregate</groupId>
-      <artifactId>jetty-all-server</artifactId>
+      <artifactId>jetty-all</artifactId>
       <version>${jetty-version}</version>
       <optional>true</optional>
     </dependency>

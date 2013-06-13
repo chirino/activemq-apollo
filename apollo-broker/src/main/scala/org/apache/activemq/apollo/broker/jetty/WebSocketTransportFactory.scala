@@ -26,8 +26,8 @@ import javax.net.ssl.SSLContext
 import org.eclipse.jetty.server.ssl.SslSelectChannelConnector
 import org.eclipse.jetty.util.thread.ExecutorThreadPool
 import javax.servlet.http.{HttpServletResponse, HttpServletRequest}
-import org.eclipse.jetty.websocket.{WebSocket, WebSocketServlet}
-import org.eclipse.jetty.server.{Connector, Server}
+import org.eclipse.jetty.websocket.servlet.WebSocketServlet
+import org.eclipse.jetty.server._
 import java.net.{URL, InetSocketAddress, URI}
 import java.lang.Class
 import scala.reflect.BeanProperty
@@ -44,6 +44,10 @@ import org.eclipse.jetty.servlet.{FilterMapping, FilterHolder, ServletHolder, Se
 import org.eclipse.jetty.util.log.Slf4jLog
 import java.util
 import javax.servlet.DispatcherType
+import scala.Some
+import org.apache.activemq.apollo.util.SerialExecutor
+import org.eclipse.jetty.util.ssl.SslContextFactory
+import org.eclipse.jetty.websocket.api.annotations.WebSocket
 
 /**
  * @author <a href="http://hiramchirino.com">Hiram Chirino</a>
@@ -107,6 +111,8 @@ object WebSocketTransportFactory extends TransportFactory.Provider with Log {
         var port = uri.getPort
         val options = URISupport.parseParamters(uri);
 
+        server = new Server(new ExecutorThreadPool(Broker.BLOCKABLE_THREAD_POOL))
+
         scheme match {
           case "ws" =>
             if (port == -1) {
@@ -120,35 +126,41 @@ object WebSocketTransportFactory extends TransportFactory.Provider with Log {
         }
 
         connector = scheme match {
-          case "ws" => new SelectChannelConnector
+          case "ws" =>
+            new ServerConnector(server, new HttpConnectionFactory(new HttpConfiguration()));
           case "wss" =>
-            val sslContext = if (broker.key_storage != null) {
-              val protocol = "TLS"
-              val sslContext = SSLContext.getInstance(protocol)
-              sslContext.init(broker.key_storage.create_key_managers, broker.key_storage.create_trust_managers, null)
-              sslContext
-            } else {
-              warn("You are using a transport that expects the broker's key storage to be configured.")
-              SSLContext.getDefault
-            }
-            val connector = new SslSelectChannelConnector
-            val ssl_settings = connector.getSslContextFactory;
-            ssl_settings.setSslContext(sslContext)
+
+            val sslContext = new SslContextFactory();
+            sslContext.setProtocol("TLS")
+
             options.get("client_auth") match {
               case null =>
-                ssl_settings.setWantClientAuth(true)
+                sslContext.setWantClientAuth(true)
               case "want" =>
-                ssl_settings.setWantClientAuth(true)
+                sslContext.setWantClientAuth(true)
               case "need" =>
-                ssl_settings.setNeedClientAuth(true)
+                sslContext.setNeedClientAuth(true)
               case "none" =>
               case _ =>
-                warn("Invalid setting for the wss protcol 'client_auth' query option.  Please set to one of: want, need, or none")
+                warn("Invalid setting for the wss protocol 'client_auth' query option.  Please set to one of: want, need, or none")
             }
-            connector
+
+            if( broker.key_storage!=null ) {
+              sslContext.setTrustStore(broker.key_storage.create_key_store)
+              sslContext.setKeyStore(broker.key_storage.create_key_store)
+              sslContext.setTrustManagerFactoryAlgorithm(broker.key_storage.trust_algorithm)
+              sslContext.setCertAlias(broker.key_storage.key_alias)
+            } else {
+              warn("You are using a transport that expects the broker's key storage to be configured.")
+            }
+
+            val https_config = new HttpConfiguration(new HttpConfiguration());
+            https_config.addCustomizer(new SecureRequestCustomizer());
+            new ServerConnector(server,
+              new SslConnectionFactory(sslContext, "HTTP/1.1"),
+              new HttpConnectionFactory(https_config));
+
         }
-        connector.setHost(host)
-        connector.setPort(port)
 
         var context = new ServletContextHandler(ServletContextHandler.NO_SECURITY)
         context.setContextPath(prefix)
@@ -160,10 +172,8 @@ object WebSocketTransportFactory extends TransportFactory.Provider with Log {
         }
         context.addServlet(new ServletHolder(this), "/")
 
-        server = new Server
         server.setHandler(context)
         server.setConnectors(Array(connector))
-        server.setThreadPool(new ExecutorThreadPool(blockingExecutor.asInstanceOf[ExecutorService]))
         server.start
 
         on_completed.run
@@ -185,10 +195,13 @@ object WebSocketTransportFactory extends TransportFactory.Provider with Log {
 
     def getBoundAddress = {
       val prefix = "/" + uri.getPath.stripPrefix("/")
-      new URI(uri.getScheme + "://" + uri.getHost + ":" + connector.getLocalPort + prefix).toString
+//      new URI(uri.getScheme + "://" + uri.getHost + ":" + connector.getLocalPort + prefix).toString
+
+      new URI(uri.getScheme + "://" + uri.getHost + ":" + 8080 + prefix).toString
     }
 
-    def getSocketAddress = new InetSocketAddress(uri.getHost, connector.getLocalPort)
+//    def getSocketAddress = new InetSocketAddress(uri.getHost, connector.getLocalPort)
+    def getSocketAddress = new InetSocketAddress(uri.getHost, 8080)
 
     val pending_connects = new ArrayBlockingQueue[WebSocketTransport](100)
     var accept_dispatch_queue = dispatchQueue

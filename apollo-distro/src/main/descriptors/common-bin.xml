@@ -57,7 +57,7 @@
         <include>org.yaml:snakeyaml</include>
         
         <!-- for the webapp -->
-        <include>org.eclipse.jetty.aggregate:jetty-all-server</include>
+        <include>org.eclipse.jetty.aggregate:jetty-all</include>
         <include>org.eclipse.jetty.orbit:javax.servlet</include>
 
         <include>javax.servlet.jsp:jsp-api</include>

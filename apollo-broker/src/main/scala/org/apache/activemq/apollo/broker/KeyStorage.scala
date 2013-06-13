@@ -39,9 +39,9 @@ class KeyStorage(val config:KeyStorageDTO) {
   }
 
   def create_key_store = {
-    if( trust_managers==null ) {
+    if( key_store==null ) {
       key_store = {
-        val store = KeyStore.getInstance(opt(config.store_type).getOrElse("JKS"))
+        val store = KeyStore.getInstance(key_store_type)
         store.load(new FileInputStream(config.file), opt(config.password).getOrElse("").toCharArray())
         store
       }
@@ -49,14 +49,19 @@ class KeyStorage(val config:KeyStorageDTO) {
     key_store
   }
 
+  def key_store_type: String = opt(config.store_type).getOrElse("JKS")
+
   def create_trust_managers = {
     if( trust_managers==null ) {
-      val factory = TrustManagerFactory.getInstance(opt(config.trust_algorithm).getOrElse("SunX509"))
+      val factory = TrustManagerFactory.getInstance(trust_algorithm)
       factory.init(create_key_store)
       trust_managers = factory.getTrustManagers
     }
     trust_managers
   }
+
+
+  def trust_algorithm: String = opt(config.trust_algorithm).getOrElse("SunX509")
 
   def create_key_managers = {
     if( key_managers==null ) {
@@ -64,10 +69,10 @@ class KeyStorage(val config:KeyStorageDTO) {
       factory.init(create_key_store, opt(config.key_password).getOrElse("").toCharArray())
       key_managers = factory.getKeyManagers
 
-      if( config.key_alias!=null ) {
+      if( key_alias!=null ) {
         key_managers = key_managers.map  { m =>
           m match {
-            case m:X509ExtendedKeyManager => AliasFilteringKeyManager(config.key_alias, m)
+            case m:X509ExtendedKeyManager => AliasFilteringKeyManager(key_alias, m)
             case _ => m
           }
         }
@@ -76,6 +81,7 @@ class KeyStorage(val config:KeyStorageDTO) {
     key_managers
   }
 
+  def key_alias = config.key_alias
 }
 
 case class AliasFilteringKeyManager(alias: String, next:X509ExtendedKeyManager) extends X509ExtendedKeyManager {

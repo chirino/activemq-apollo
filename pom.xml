@@ -70,7 +70,7 @@
     <howl-version>0.1.8</howl-version>
     <hsqldb-version>1.7.2.2</hsqldb-version>
     <jdom-version>1.0</jdom-version>
-    <jetty-version>8.1.5.v20120716</jetty-version>
+    <jetty-version>9.0.3.v20130506</jetty-version>
     <jmock-version>1.0.1</jmock-version>
     <junit-version>4.10</junit-version>
     <jxta-version>2.0</jxta-version>
@@ -118,7 +118,7 @@
     <jersey-version>1.7</jersey-version>
     <snakeyaml-version>1.7</snakeyaml-version>
     <swagger-version>1.2.0</swagger-version>
-    <jolokia-version>1.0.6</jolokia-version>
+    <jolokia-version>1.1.1</jolokia-version>
 
     <selenium-version>2.33.0</selenium-version>
       
@@ -126,7 +126,7 @@
 
     <scala-plugin-version>3.1.0</scala-plugin-version>
     <maven-surefire-plugin-version>2.12</maven-surefire-plugin-version>
-    <jetty-plugin-version>7.0.1.v20091125</jetty-plugin-version>
+    <jetty-plugin-version>9.0.3.v20130506</jetty-plugin-version>
     
     <!-- disable unique version timestamps in snapshots -->
     <uniqueVersion>false</uniqueVersion>

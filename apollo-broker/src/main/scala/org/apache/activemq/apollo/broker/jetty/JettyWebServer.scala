@@ -16,15 +16,13 @@
  */
 package org.apache.activemq.apollo.broker.jetty
 
-import org.eclipse.jetty.server.{Connector, Handler, Server}
+import org.eclipse.jetty.server._
 import org.apache.activemq.apollo.broker.Broker
 import org.eclipse.jetty.webapp.WebAppContext
-import org.eclipse.jetty.server.nio.SelectChannelConnector
 import org.apache.activemq.apollo.util._
 import org.fusesource.hawtdispatch._
 import org.eclipse.jetty.server.handler.HandlerList
 import collection.mutable.HashMap
-import org.eclipse.jetty.server.ssl.SslSelectChannelConnector
 import javax.net.ssl.SSLContext
 import org.eclipse.jetty.util.thread.ExecutorThreadPool
 import org.apache.activemq.apollo.dto.WebAdminDTO
@@ -37,6 +35,7 @@ import org.apache.activemq.apollo.broker.web.{AllowAnyOriginFilter, WebServer, W
 import javax.servlet._
 import org.eclipse.jetty.util.log.Slf4jLog
 import java.util
+import org.eclipse.jetty.util.ssl.SslContextFactory
 
 /**
  * <p>
@@ -171,6 +170,9 @@ class JettyWebServer(val broker:Broker) extends WebServer with BaseService {
         val contexts = HashMap[String, Handler]()
         val connectors = HashMap[String, Connector]()
 
+        server = new Server(new ExecutorThreadPool(Broker.BLOCKABLE_THREAD_POOL))
+        val http_config = new HttpConfiguration();
+
         web_admins = config.web_admins.toList
         web_admins.foreach { web_admin =>
 
@@ -202,22 +204,41 @@ class JettyWebServer(val broker:Broker) extends WebServer with BaseService {
           if ( !connectors.containsKey(connector_id) ) {
 
             val connector = scheme match {
-              case "http" => new SelectChannelConnector
+              case "http" =>
+                new ServerConnector(server, new HttpConnectionFactory(http_config));
               case "https" =>
-                val sslContext = if( broker.key_storage!=null ) {
-                  val protocol = "TLS"
-                  val sslContext = SSLContext.getInstance (protocol)
-                  sslContext.init(broker.key_storage.create_key_managers, broker.key_storage.create_trust_managers, null)
-                  sslContext
-                } else {
-                  SSLContext.getDefault
+
+                http_config.setSecureScheme("https");
+                http_config.setSecurePort(port);
+
+                val sslContext = new SslContextFactory();
+                sslContext.setProtocol("TLS")
+                query.get("client_auth") match {
+                  case null =>
+                    sslContext.setWantClientAuth(true)
+                  case "want" =>
+                    sslContext.setWantClientAuth(true)
+                  case "need" =>
+                    sslContext.setNeedClientAuth(true)
+                  case "none" =>
+                  case _ =>
+                    warn("Invalid setting for the https protocol 'client_auth' query option.  Please set to one of: want, need, or none")
                 }
 
-                val connector = new SslSelectChannelConnector
-                val ssl_settings = connector.getSslContextFactory;
-                ssl_settings.setSslContext(sslContext)
-                ssl_settings.setWantClientAuth(true)
-                connector
+                if( broker.key_storage!=null ) {
+                  sslContext.setTrustStore(broker.key_storage.create_key_store)
+                  sslContext.setKeyStore(broker.key_storage.create_key_store)
+                  sslContext.setTrustManagerFactoryAlgorithm(broker.key_storage.trust_algorithm)
+                  sslContext.setCertAlias(broker.key_storage.key_alias)
+                } else {
+                  warn("You are using a transport that expects the broker's key storage to be configured.")
+                }
+
+                val https_config = new HttpConfiguration(http_config);
+                https_config.addCustomizer(new SecureRequestCustomizer());
+                new ServerConnector(server,
+                  new SslConnectionFactory(sslContext, "HTTP/1.1"),
+                  new HttpConnectionFactory(https_config));
             }
 
             connector.setHost(host)
@@ -257,20 +278,19 @@ class JettyWebServer(val broker:Broker) extends WebServer with BaseService {
         val context_list = new HandlerList
         contexts.values.foreach(context_list.addHandler(_))
 
-        server = new Server
         server.setHandler(context_list)
         server.setConnectors(connectors.values.toArray)
-        server.setThreadPool(new ExecutorThreadPool(Broker.BLOCKABLE_THREAD_POOL))
         server.start
 
         for( connector <- connectors.values ; prefix <- contexts.keys ) {
-          val localPort = connector.getLocalPort
-          val scheme = connector match {
-            case x:SslSelectChannelConnector => "https"
-            case _ => "http"
+          val (scheme,host,localPort) = connector.getTransport match {
+            case x:Object =>
+              println(x)
+              ("https", "localhost", 8080)
+            case _ => ("http", "localhost", 8080)
           }
 
-          val uri:URI = new URI(scheme, null, connector.getHost, localPort, prefix, null, null)
+          val uri:URI = new URI(scheme, null, host, localPort, prefix, null, null)
           broker.console_log.info("Administration interface available at: %s", uri)
           uri_addresses ::= uri
         }
